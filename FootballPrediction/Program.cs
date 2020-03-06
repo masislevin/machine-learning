@@ -8,7 +8,7 @@ namespace FootballPrediction
     {
         static readonly string _trainDataPath = Path.Combine(Environment.CurrentDirectory, "Data", "football-train-data.csv");
         static readonly string _testDataPath = Path.Combine(Environment.CurrentDirectory, "Data", "football-test-data.csv");
-        static readonly string _modelPath = Path.Combine(Environment.CurrentDirectory, "Data", "Model.zip");
+        static readonly string _modelPath = Path.Combine(Environment.CurrentDirectory , "..", "..", "..", "Models", "model.zip");
 
         static void Main(string[] args)
         {
@@ -18,7 +18,7 @@ namespace FootballPrediction
 
             Evaluate(mlContext, model);
 
-            TestSinglePrediction(mlContext, model);
+            TestSinglePrediction(mlContext);
         }
 
         public static ITransformer Train(MLContext mlContext, string dataPath)
@@ -29,10 +29,15 @@ namespace FootballPrediction
                 .Append(mlContext.Transforms.Categorical.OneHotEncoding(outputColumnName: "HomeTeamIdEncoded", inputColumnName: "HomeTeamId"))
                 .Append(mlContext.Transforms.Categorical.OneHotEncoding(outputColumnName: "AwayTeamIdEncoded", inputColumnName: "AwayTeamId"))
                 .Append(mlContext.Transforms.Categorical.OneHotEncoding(outputColumnName: "AwayTeamScoreEncoded", inputColumnName: "AwayTeamScore"))
-                .Append(mlContext.Transforms.Concatenate("Features", "HomeTeamIdEncoded", "AwayTeamIdEncoded", "AwayTeamScore"))
+                .Append(mlContext.Transforms.Concatenate("Features", "HomeTeamIdEncoded", "AwayTeamIdEncoded", "AwayTeamScoreEncoded"))
                 .Append(mlContext.Regression.Trainers.FastTree());
 
             var model = pipeline.Fit(dataView);
+
+            using (var fileStream = new FileStream(_modelPath, FileMode.Create, FileAccess.Write, FileShare.Write))
+            {
+                mlContext.Model.Save(model, dataView.Schema, fileStream);
+            }
 
             return model;
         }
@@ -52,26 +57,32 @@ namespace FootballPrediction
 
             Console.WriteLine($"* RSquared Score: {metrics.RSquared:0.##}");
             Console.WriteLine($"* Root Mean Squared Error: {metrics.RootMeanSquaredError:#.##}");
-
         }
 
-        private static void TestSinglePrediction(MLContext mlContext, ITransformer model)
+        private static void TestSinglePrediction(MLContext mlContext)
         {
+            ITransformer model = mlContext.Model.Load(_modelPath, out var modelInputSchema);
+            
             var predictionFunction = mlContext.Model.CreatePredictionEngine<FootballData, FootballPrediction>(model);
 
             var sampleFixture = new FootballData()
             {
-                HomeTeamId  = 10636,
-                AwayTeamId = 10618,
-                AwayTeamScore = 4,
+                HomeTeamId  = 10619,
+                AwayTeamId = 10593,
+                AwayTeamScore = 0, // bias
                 HomeTeamScore = 0 // Actual 1
             };
 
             var prediction = predictionFunction.Predict(sampleFixture);
 
             Console.WriteLine($"**********************************************************************");
-            Console.WriteLine($"Predicted Home Goals: {prediction.HomeTeamScore:0.####}, Actual Goals: 0");
+            Console.WriteLine($"Predicted Home Goals: {prediction.HomeTeamScore:0.####}, Actual Goals: #");
             Console.WriteLine($"**********************************************************************");
+        }
+
+        public static void SaveModel(MLContext mlContext, DataViewSchema trainingDataViewSchema, ITransformer model)
+        {
+            mlContext.Model.Save(model, trainingDataViewSchema, _modelPath);
         }
     }
 }
