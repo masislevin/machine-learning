@@ -5,18 +5,16 @@ namespace FootballPrediction
     public class FootballData
     {
         [LoadColumn(0)]
-        public string HomeTeamId;
+        public uint HomeTeamId;
         [LoadColumn(1)]
-        public string AwayTeamId;
-        [LoadColumn(2)]
-        public string MatchDate;
+        public uint AwayTeamId;
         [LoadColumn(5)]
         public string FullTimeResult;
     }
 
     public class FootballPrediction
     {
-        [ColumnName("Label")]
+        [ColumnName("PredictedLabel")]
         public string FullTimeResult;
     }
 }
