@@ -15,6 +15,18 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Reference Include="Microsoft.ML.Recommender">
+      <HintPath>..\MovieRecommender\bin\Debug\netcoreapp3.1\Microsoft.ML.Recommender.dll</HintPath>
+    </Reference>
+    <Reference Include="Microsoft.ML.StandardTrainers">
+      <HintPath>..\MovieRecommender\bin\Debug\netcoreapp3.1\Microsoft.ML.StandardTrainers.dll</HintPath>
+    </Reference>
+    <Reference Include="Microsoft.ML.Transforms">
+      <HintPath>..\MovieRecommender\bin\Debug\netcoreapp3.1\Microsoft.ML.Transforms.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
     <None Update="Data\football-test-data.csv">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>

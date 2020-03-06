@@ -6,101 +6,72 @@ namespace FootballPrediction
 {
     class Program
     {
-        private static string _appPath => Path.GetDirectoryName(Environment.GetCommandLineArgs()[0]);
-        private static string _trainDataPath => Path.Combine(_appPath, "..", "..", "..", "Data", "football-train-data.csv");
-        private static string _testDataPath => Path.Combine(_appPath, "..", "..", "..", "Data", "football-test-data.csv");
-        private static string _modelPath => Path.Combine(_appPath, "..", "..", "..", "Models", "model.zip");
-
-        private static MLContext _mlContext;
-        private static PredictionEngine<FootballData, FootballPrediction> _predEngine;
-        private static ITransformer _trainedModel;
-        static IDataView _trainingDataView;
+        static readonly string _trainDataPath = Path.Combine(Environment.CurrentDirectory, "Data", "football-train-data.csv");
+        static readonly string _testDataPath = Path.Combine(Environment.CurrentDirectory, "Data", "football-test-data.csv");
+        static readonly string _modelPath = Path.Combine(Environment.CurrentDirectory, "Data", "Model.zip");
 
         static void Main(string[] args)
         {
-            _mlContext = new MLContext(seed: 0);
+            MLContext mlContext = new MLContext(seed: 0);
 
-            _trainingDataView = _mlContext.Data.LoadFromTextFile<FootballData>(_trainDataPath, hasHeader: true);
+            var model = Train(mlContext, _trainDataPath);
 
-            var pipeline = GetPipeline();
+            Evaluate(mlContext, model);
 
-            var trainingPipeline = BuildAndTrainModel(_trainingDataView, pipeline);
-
-            Evaluate(_trainingDataView.Schema);
-
-            PredictFixture();
+            TestSinglePrediction(mlContext, model);
         }
 
-        private static void PredictFixture()
+        public static ITransformer Train(MLContext mlContext, string dataPath)
         {
-            ITransformer loadedModel = _mlContext.Model.Load(_modelPath, out var modelInputSchema);
+            IDataView dataView = mlContext.Data.LoadFromTextFile<FootballData>(dataPath, hasHeader: false, separatorChar: ',');
 
-            FootballData singleIssue = new FootballData() 
+            var pipeline = mlContext.Transforms.CopyColumns(outputColumnName: "Label", inputColumnName: "HomeTeamScore")
+                .Append(mlContext.Transforms.Categorical.OneHotEncoding(outputColumnName: "HomeTeamIdEncoded", inputColumnName: "HomeTeamId"))
+                .Append(mlContext.Transforms.Categorical.OneHotEncoding(outputColumnName: "AwayTeamIdEncoded", inputColumnName: "AwayTeamId"))
+                .Append(mlContext.Transforms.Categorical.OneHotEncoding(outputColumnName: "AwayTeamScoreEncoded", inputColumnName: "AwayTeamScore"))
+                .Append(mlContext.Transforms.Concatenate("Features", "HomeTeamIdEncoded", "AwayTeamIdEncoded", "AwayTeamScore"))
+                .Append(mlContext.Regression.Trainers.FastTree());
+
+            var model = pipeline.Fit(dataView);
+
+            return model;
+        }
+
+        private static void Evaluate(MLContext mlContext, ITransformer model)
+        {
+            IDataView dataView = mlContext.Data.LoadFromTextFile<FootballData>(_testDataPath, hasHeader: false, separatorChar: ',');
+
+            var predictions = model.Transform(dataView);
+
+            var metrics = mlContext.Regression.Evaluate(predictions, "Label", "Score");
+
+            Console.WriteLine();
+            Console.WriteLine($"*************************************************");
+            Console.WriteLine($"* Model quality metrics evaluation => Home Score ");
+            Console.WriteLine($"*------------------------------------------------");
+
+            Console.WriteLine($"* RSquared Score: {metrics.RSquared:0.##}");
+            Console.WriteLine($"* Root Mean Squared Error: {metrics.RootMeanSquaredError:#.##}");
+
+        }
+
+        private static void TestSinglePrediction(MLContext mlContext, ITransformer model)
+        {
+            var predictionFunction = mlContext.Model.CreatePredictionEngine<FootballData, FootballPrediction>(model);
+
+            var sampleFixture = new FootballData()
             {
-                HomeTeamId = 10615,
-                AwayTeamId = 10586
+                HomeTeamId  = 10636,
+                AwayTeamId = 10618,
+                AwayTeamScore = 4,
+                HomeTeamScore = 0 // Actual 1
             };
 
-            _predEngine = _mlContext.Model.CreatePredictionEngine<FootballData, FootballPrediction>(loadedModel);
+            var prediction = predictionFunction.Predict(sampleFixture);
 
-            var prediction = _predEngine.Predict(singleIssue);
-
-            Console.WriteLine($"=============== Single Prediction - Result: {prediction.FullTimeResult} ===============");
-        }
-
-        private static void SaveModelAsFile(MLContext mlContext, DataViewSchema trainingDataViewSchema, ITransformer model)
-        {
-            mlContext.Model.Save(model, trainingDataViewSchema, _modelPath);
-        }
-
-        public static void Evaluate(DataViewSchema trainingDataViewSchema)
-        {
-            var testDataView = _mlContext.Data.LoadFromTextFile<FootballData>(_testDataPath, hasHeader: true);
-
-            var testMetrics = _mlContext.MulticlassClassification.Evaluate(_trainedModel.Transform(testDataView));
-
-            Console.WriteLine($"*************************************************************************************************************");
-            Console.WriteLine($"*       Metrics for Multi-class Classification model - Test Data     ");
-            Console.WriteLine($"*------------------------------------------------------------------------------------------------------------");
-            Console.WriteLine($"*       MicroAccuracy:    {testMetrics.MicroAccuracy:0.###}");
-            Console.WriteLine($"*       MacroAccuracy:    {testMetrics.MacroAccuracy:0.###}");
-            Console.WriteLine($"*       LogLoss:          {testMetrics.LogLoss:#.###}");
-            Console.WriteLine($"*       LogLossReduction: {testMetrics.LogLossReduction:#.###}");
-            Console.WriteLine($"*************************************************************************************************************");
-
-            SaveModelAsFile(_mlContext, trainingDataViewSchema, _trainedModel);
-        }
-
-        public static IEstimator<ITransformer> BuildAndTrainModel(IDataView trainingDataView, IEstimator<ITransformer> pipeline)
-        {
-            var trainingPipeline = pipeline.Append(_mlContext.MulticlassClassification.Trainers.SdcaMaximumEntropy("Label", "Features"))
-                                           .Append(_mlContext.Transforms.Conversion.MapKeyToValue("PredictedLabel"));
-
-            _trainedModel = trainingPipeline.Fit(trainingDataView);
-
-            _predEngine = _mlContext.Model.CreatePredictionEngine<FootballData, FootballPrediction>(_trainedModel);
-
-            FootballData fixture = new FootballData() 
-            {
-                HomeTeamId = 10618,
-                AwayTeamId = 10601
-            };
-
-            var prediction = _predEngine.Predict(fixture);
-
-            Console.WriteLine($"=============== Single Prediction just-trained-model - Result: {prediction.FullTimeResult} ===============");
-
-            return trainingPipeline;
-        }
-
-        public static IEstimator<ITransformer> GetPipeline()
-        {
-            return _mlContext.Transforms.Conversion
-                        .MapValueToKey(inputColumnName: "FullTimeResult", outputColumnName: "Label")
-                        .Append(_mlContext.Transforms.Text.FeaturizeText(inputColumnName: "HomeTeamId", outputColumnName: "HomeTeamIdFeaturized"))
-                        .Append(_mlContext.Transforms.Text.FeaturizeText(inputColumnName: "AwayTeamId", outputColumnName: "AwayTeamIdFeaturized"))
-                        .Append(_mlContext.Transforms.Concatenate("Features", "HomeTeamIdFeaturized", "AwayTeamIdFeaturized"))
-                        .AppendCacheCheckpoint(_mlContext);
+            Console.WriteLine($"**********************************************************************");
+            Console.WriteLine($"Predicted Home Goals: {prediction.HomeTeamScore:0.####}, Actual Goals: 0");
+            Console.WriteLine($"**********************************************************************");
         }
     }
 }
